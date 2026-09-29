@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vocab Match AR - เกมจับคู่คำศัพท์คอมพิวเตอร์เบื้องต้น ป.3</title>
+    
+    <!-- Tailwind CSS for UI styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts: Kanit for Thai Modern UI -->
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <!-- Canvas Confetti Library for victory effect -->
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+    <!-- MediaPipe Hands CDN dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Kanit', sans-serif;
+            background-color: #090d16;
+            color: #f8fafc;
+            overflow: hidden;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        /* Glassmorphism card styles */
+        .glass-card {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 2px solid rgba(255, 255, 255, 0.18);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .glass-card-left {
+            background: linear-gradient(135deg, rgba(14, 165, 233, 0.9) 0%, rgba(3, 105, 161, 0.9) 100%);
+            border: 2px solid rgba(186, 230, 253, 0.6);
+            box-shadow: 0 10px 25px -5px rgba(14, 165, 233, 0.5);
+        }
+
+        .glass-card-right {
+            background: linear-gradient(135deg, rgba(168, 85, 247, 0.9) 0%, rgba(126, 34, 206, 0.9) 100%);
+            border: 2px solid rgba(233, 213, 255, 0.6);
+            box-shadow: 0 10px 25px -5px rgba(168, 85, 247, 0.5);
+        }
+
+        .card-selected {
+            transform: scale(1.06);
+            border-color: #fde047 !important;
+            box-shadow: 0 0 25px #fde047, inset 0 0 15px rgba(253, 224, 71, 0.6) !important;
+        }
+
+        .card-correct {
+            animation: pulse-green 0.6s ease-in-out infinite alternate;
+            border-color: #22c55e !important;
+            box-shadow: 0 0 35px #22c55e, inset 0 0 20px rgba(34, 197, 94, 0.7) !important;
+            background: rgba(34, 197, 94, 0.92) !important;
+        }
+
+        .card-wrong {
+            animation: shake 0.4s ease-in-out;
+            border-color: #ef4444 !important;
+            box-shadow: 0 0 30px #ef4444, inset 0 0 15px rgba(239, 68, 68, 0.7) !important;
+            background: rgba(239, 68, 68, 0.92) !important;
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-12px); }
+            40%, 80% { transform: translateX(12px); }
+        }
+
+        @keyframes pulse-green {
+            0% { transform: scale(1.02); }
+            100% { transform: scale(1.08); }
+        }
+
+        /* HUD Badges */
+        .hud-badge {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1.5px solid rgba(255, 255, 255, 0.2);
+        }
+
+        /* Glowing text effects */
+        .neon-text-blue {
+            text-shadow: 0 0 10px rgba(56, 189, 248, 0.8), 0 0 20px rgba(56, 189, 248, 0.5);
+        }
+
+        .neon-text-yellow {
+            text-shadow: 0 0 10px rgba(250, 204, 21, 0.8), 0 0 20px rgba(250, 204, 21, 0.5);
+        }
+
+        /* Video mirror mode */
+        .mirror-mode {
+            transform: scaleX(-1);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.3);
+            border-radius: 4px;
+        }
+    </style>
+</head>
+<body class="w-screen h-screen relative bg-slate-950 overflow-hidden flex flex-col justify-between">
+
+    <!-- Video element for WebCam -->
+    <video id="webcam-feed" class="hidden" playsinline muted></video>
+
+    <!-- AR Layer Canvas -->
+    <canvas id="ar-canvas" class="absolute inset-0 w-full h-full z-0 mirror-mode object-cover"></canvas>
+
+    <!-- UI Overlay Layer -->
+    <div id="ui-layer" class="absolute inset-0 z-10 flex flex-col justify-between pointer-events-none p-3 md:p-6">
+        
+        <!-- Top HUD Header -->
+        <header class="w-full flex justify-between items-start pointer-events-auto gap-2 md:gap-4 flex-wrap">
+            <!-- Left Info Panel: Score, Question Progress, Timer -->
+            <div class="flex flex-wrap items-center gap-2 md:gap-3">
+                <!-- Score Badge -->
+                <div class="hud-badge px-3.5 py-2 rounded-2xl flex items-center gap-2.5 shadow-lg">
+                    <div class="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-lg font-bold">
+                        <i class="fa-solid fa-trophy"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] md:text-xs text-slate-400 font-medium">คะแนน (Score)</div>
+                        <div id="hud-score" class="text-xl md:text-2xl font-black text-amber-400 neon-text-yellow">0</div>
+                    </div>
+                </div>
+
+                <!-- Progress Badge -->
+                <div class="hud-badge px-3.5 py-2 rounded-2xl flex items-center gap-2.5 shadow-lg">
+                    <div class="w-9 h-9 rounded-xl bg-sky-500/20 text-sky-400 flex items-center justify-center text-lg font-bold">
+                        <i class="fa-solid fa-layer-group"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] md:text-xs text-slate-400 font-medium">ข้อที่ (Progress)</div>
+                        <div class="text-xl md:text-2xl font-black text-sky-400">
+                            <span id="hud-current-question">1</span> / <span id="hud-total-questions">10</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Timer Badge (2-Minute Countdown Timer) -->
+                <div class="hud-badge px-3.5 py-2 rounded-2xl flex items-center gap-2.5 shadow-lg">
+                    <div class="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-lg font-bold">
+                        <i class="fa-solid fa-stopwatch"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] md:text-xs text-slate-400 font-medium">เวลาถอยหลัง (2 นาที)</div>
+                        <div id="hud-timer" class="text-xl md:text-2xl font-black text-emerald-400">02:00</div>
+                    </div>
+                </div>
+
+                <!-- Curriculum Info Quick Button -->
+                <button id="open-curriculum-btn" class="hud-badge px-3.5 py-2 rounded-2xl flex items-center gap-2 hover:bg-slate-800 text-amber-300 text-xs font-semibold cursor-pointer border border-amber-500/40 transition shadow-md">
+                    <i class="fa-solid fa-book-bookmark text-base"></i>
+                    <span class="hidden lg:inline">ตัวชี้วัด & ข้อมูลวิชา</span>
+                </button>
+            </div>
+
+            <!-- Right Info Panel: Stars, Accuracy & Mode Toggle -->
+            <div class="flex flex-wrap items-center gap-2 md:gap-3 justify-end">
+                <!-- Stars Badge -->
+                <div class="hud-badge px-3.5 py-2 rounded-2xl flex items-center gap-2 shadow-lg">
+                    <div id="hud-stars" class="flex gap-1 text-lg text-amber-400">
+                        <i class="fa-solid fa-star"></i>
+                        <i class="fa-solid fa-star"></i>
+                        <i class="fa-solid fa-star"></i>
+                    </div>
+                </div>
+
+                <!-- Accuracy Badge -->
+                <div class="hud-badge px-3.5 py-2 rounded-2xl flex items-center gap-2.5 shadow-lg">
+                    <div class="w-9 h-9 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center text-lg font-bold">
+                        <i class="fa-solid fa-bullseye"></i>
+                    </div>
+                    <div>
+                        <div class="text-[10px] md:text-xs text-slate-400 font-medium">ความถูกต้อง</div>
+                        <div id="hud-accuracy" class="text-xl md:text-2xl font-black text-purple-400">100%</div>
+                    </div>
+                </div>
+
+                <!-- Input Mode Toggle Button -->
+                <button id="toggle-input-mode-btn" class="hud-badge px-3.5 py-2 rounded-2xl flex items-center gap-2 hover:bg-slate-800 transition text-sky-300 text-xs md:text-sm font-semibold cursor-pointer border border-sky-500/40 shadow-md">
+                    <i class="fa-solid fa-video text-base" id="mode-icon"></i>
+                    <span id="mode-text">โหมด AR นิ้วมือ</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Center Arena: Matching Cards Left vs Right -->
+        <main class="w-full flex-1 my-3 flex justify-between items-center px-2 md:px-12 relative gap-4">
+            <!-- Left Cards Container (English Terms) -->
+            <div id="left-cards-container" class="w-2/5 max-w-xs md:max-w-md flex flex-col gap-3 pointer-events-auto">
+                <!-- Populated dynamically via JS -->
+            </div>
+
+            <!-- Central Visual Feedback Popup -->
+            <div id="feedback-popup" class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none transition-all duration-300 opacity-0 scale-50 z-30 text-center">
+                <div id="feedback-box" class="px-8 py-4 rounded-3xl shadow-2xl border-4 backdrop-blur-md flex flex-col items-center justify-center">
+                    <div id="feedback-icon" class="text-6xl mb-2"></div>
+                    <div id="feedback-text" class="text-2xl md:text-4xl font-extrabold text-white tracking-wide"></div>
+                </div>
+            </div>
+
+            <!-- Right Cards Container (Thai Definitions) -->
+            <div id="right-cards-container" class="w-2/5 max-w-xs md:max-w-md flex flex-col gap-3 pointer-events-auto">
+                <!-- Populated dynamically via JS -->
+            </div>
+        </main>
+
+        <!-- Bottom Footer Status Bar -->
+        <footer class="w-full flex justify-between items-center px-4 py-2 hud-badge rounded-2xl pointer-events-auto text-xs text-slate-300">
+            <div class="flex items-center gap-2">
+                <span id="camera-status-ping" class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
+                <span id="camera-status-text">กำลังเชื่อมต่อกล้อง AR...</span>
+            </div>
+            <div class="font-medium text-slate-300 hidden sm:block">
+                คำแนะนำ: ชี้ปลายนิ้วชี้แตะการ์ดภาษาอังกฤษฝั่งซ้าย แล้วลากเส้นไปยังการ์ดความหมายฝั่งขวา
+            </div>
+        </footer>
+    </div>
+
+    <!-- Pre-Game / Start Modal Overlay -->
+    <div id="start-modal" class="fixed inset-0 z-50 bg-slate-950/92 backdrop-blur-xl flex items-center justify-center p-4 overflow-y-auto">
+        <div class="max-w-2xl w-full bg-slate-900 border-2 border-sky-500/50 rounded-3xl p-5 md:p-7 shadow-2xl relative overflow-hidden my-auto">
+            <!-- Decorative Glow Backgrounds -->
+            <div class="absolute -top-24 -left-24 w-48 h-48 bg-sky-500/30 rounded-full blur-3xl pointer-events-none"></div>
+            <div class="absolute -bottom-24 -right-24 w-48 h-48 bg-purple-500/30 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div class="relative z-10 space-y-4">
+                <!-- Title Header -->
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-gradient-to-tr from-sky-500 via-indigo-500 to-purple-600 rounded-2xl mx-auto flex items-center justify-center text-3xl text-white shadow-xl mb-2">
+                        <i class="fa-solid fa-hand-pointer"></i>
+                    </div>
+                    <h1 class="text-2xl md:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-sky-400 via-indigo-200 to-purple-400">
+                        Vocab Match AR
+                    </h1>
+                    <p class="text-sky-300 text-xs md:text-sm font-semibold mt-1">
+                        เกมจับคู่คำศัพท์คอมพิวเตอร์เบื้องต้น ชั้นประถมศึกษาปีที่ 3 ด้วยเทคโนโลยี AR ตรวจจับมือ
+                    </p>
+                </div>
+
+                <!-- Curriculum & Learning Standard Badge Grid -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center text-xs">
+                    <div class="bg-slate-800/80 border border-slate-700 p-2.5 rounded-2xl shadow-inner">
+                        <div class="text-slate-400 text-[10px]">กลุ่มสาระการเรียนรู้</div>
+                        <div class="font-bold text-sky-300 text-xs">วิทยาศาสตร์และเทคโนโลยี</div>
+                    </div>
+                    <div class="bg-slate-800/80 border border-slate-700 p-2.5 rounded-2xl shadow-inner">
+                        <div class="text-slate-400 text-[10px]">ระดับชั้น (Grade)</div>
+                        <div class="font-bold text-purple-300 text-xs">ประถมศึกษาปีที่ 3 (ป.3)</div>
+                    </div>
+                    <div class="bg-slate-800/80 border border-slate-700 p-2.5 rounded-2xl shadow-inner">
+                        <div class="text-slate-400 text-[10px]">หน่วยการเรียนรู้</div>
+                        <div class="font-bold text-amber-300 text-xs">หน่วยที่ 1 คำศัพท์ IT น่ารู้</div>
+                    </div>
+                    <div class="bg-slate-800/80 border border-slate-700 p-2.5 rounded-2xl shadow-inner">
+                        <div class="text-slate-400 text-[10px]">ตัวชี้วัดหลัก</div>
+                        <div class="font-bold text-emerald-300 text-xs">ว 4.2 ป.3/3 & ต 1.1 ป.3/2</div>
+                    </div>
+                </div>
+
+                <!-- Learning Objectives & Instructions Box -->
+                <div class="bg-slate-800/70 rounded-2xl p-4 border border-slate-700 space-y-3 text-xs md:text-sm">
+                    <div>
+                        <h3 class="font-bold text-amber-400 flex items-center gap-2 text-sm mb-1.5">
+                            <i class="fa-solid fa-bullseye text-base"></i> จุดประสงค์การเรียนรู้ (Learning Objectives)
+                        </h3>
+                        <ul class="list-disc list-inside text-slate-300 space-y-1 pl-1 text-xs md:text-sm">
+                            <li>อ่าน ออกเสียง และอธิบายความหมายของคำศัพท์คอมพิวเตอร์ภาษาอังกฤษได้ถูกต้อง</li>
+                            <li>เข้าประเด็นเรื่องการใช้งานเทคโนโลยีสารสนเทศอย่างปลอดภัยและเข้าใจศัพท์พื้นฐาน</li>
+                            <li>พัฒนาทักษะการประสานงานระหว่างสายตาและมือ (Hand-Eye Coordination) ผ่านระบบ AR</li>
+                        </ul>
+                    </div>
+
+                    <div class="border-t border-slate-700/80 pt-2.5">
+                        <h3 class="font-bold text-sky-400 flex items-center gap-2 text-sm mb-2">
+                            <i class="fa-solid fa-gamepad text-base"></i> คำชี้แจงและวิธีการเล่น (How to Play)
+                        </h3>
+                        <div class="grid grid-cols-3 gap-2 text-center text-[11px] md:text-xs">
+                            <div class="bg-slate-900/90 p-2.5 rounded-xl border border-sky-500/30 flex flex-col items-center justify-center">
+                                <i class="fa-solid fa-hand-point-up text-amber-400 text-xl mb-1"></i>
+                                <span class="font-bold text-white">1. ชี้ปลายนิ้ว</span>
+                                <p class="text-slate-400 text-[10px] mt-0.5">แตะการ์ดภาษาอังกฤษฝั่งซ้าย</p>
+                            </div>
+                            <div class="bg-slate-900/90 p-2.5 rounded-xl border border-sky-500/30 flex flex-col items-center justify-center">
+                                <i class="fa-solid fa-route text-sky-400 text-xl mb-1"></i>
+                                <span class="font-bold text-white">2. ลากเส้นแสง</span>
+                                <p class="text-slate-400 text-[10px] mt-0.5">ลากนิ้วข้ามไปยังฝั่งขวา</p>
+                            </div>
+                            <div class="bg-slate-900/90 p-2.5 rounded-xl border border-sky-500/30 flex flex-col items-center justify-center">
+                                <i class="fa-solid fa-circle-check text-emerald-400 text-xl mb-1"></i>
+                                <span class="font-bold text-white">3. รับ +10 คะแนน</span>
+                                <p class="text-slate-400 text-[10px] mt-0.5">เมื่อจับคู่ถูกต้องทันที</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button id="start-game-btn" class="w-full py-3.5 bg-gradient-to-r from-sky-500 via-indigo-500 to-purple-600 hover:from-sky-400 hover:to-purple-500 text-white font-extrabold text-base md:text-lg rounded-2xl shadow-xl hover:shadow-sky-500/30 transition duration-300 transform active:scale-95 flex items-center justify-center gap-3 cursor-pointer">
+                    <i class="fa-solid fa-play"></i>
+                    <span>อนุญาตใช้กล้องและเริ่มเล่นเกม (Start Game)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Curriculum Modal Dialog -->
+    <div id="curriculum-modal" class="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex items-center justify-center p-4 hidden">
+        <div class="max-w-lg w-full bg-slate-900 border-2 border-amber-500/40 rounded-3xl p-6 shadow-2xl relative">
+            <button id="close-curriculum-btn" class="absolute top-4 right-4 text-slate-400 hover:text-white text-xl cursor-pointer">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <h2 class="text-xl font-bold text-amber-400 mb-4 flex items-center gap-2">
+                <i class="fa-solid fa-graduation-cap text-2xl"></i> ข้อมูลหลักสูตรและตัวชี้วัด (ป.3)
+            </h2>
+            <div class="space-y-3 text-xs md:text-sm text-slate-300">
+                <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+                    <span class="text-slate-400 font-medium">วิชา:</span>
+                    <span class="font-bold text-sky-300 ml-1">วิทยาการคำนวณ (เทคโนโลยี) & ภาษาอังกฤษ</span>
+                </div>
+                <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+                    <span class="text-slate-400 font-medium">ระดับชั้น:</span>
+                    <span class="font-bold text-purple-300 ml-1">ชั้นประถมศึกษาปีที่ 3 (ป.3)</span>
+                </div>
+                <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700">
+                    <span class="text-slate-400 font-medium">หน่วยการเรียนรู้:</span>
+                    <span class="font-bold text-amber-300 ml-1">หน่วยที่ 1 การใช้งานคอมพิวเตอร์และคำศัพท์น่ารู้</span>
+                </div>
+                <div class="bg-slate-800/80 p-3 rounded-xl border border-slate-700 space-y-2">
+                    <div class="text-emerald-400 font-bold">ตัวชี้วัดการเรียนรู้ (Standard & Indicators):</div>
+                    <p>• <b>ว 4.2 ป.3/3:</b> ใช้เทคโนโลยีสารสนเทศอย่างปลอดภัย ปฏิบัติตามข้อตกลงในการใช้คอมพิวเตอร์ และเข้าใจคำศัพท์พื้นฐานทางเทคโนโลยี</p>
+                    <p>• <b>ต 1.1 ป.3/2:</b> อ่านออกเสียงคำ สะกดคำ อ่านกลุ่มคำ ประโยค และระบุภาพหรือข้อความตรงตามความหมายของคำศัพท์ภาษาอังกฤษที่ฟังหรืออ่าน</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Game Over Result Modal -->
+    <div id="result-modal" class="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-xl flex items-center justify-center p-4 hidden">
+        <div class="max-w-xl w-full bg-slate-900 border-2 border-amber-500/50 rounded-3xl p-6 md:p-8 shadow-2xl text-center relative overflow-hidden">
+            <div class="absolute -top-32 -right-32 w-64 h-64 bg-amber-500/20 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div class="relative z-10">
+                <div class="text-6xl text-amber-400 mb-2 animate-bounce">
+                    <i class="fa-solid fa-trophy"></i>
+                </div>
+                <h2 class="text-2xl md:text-4xl font-extrabold text-white mb-1">สรุปผลการประเมินการเรียนรู้</h2>
+                <div id="result-grade" class="text-lg md:text-xl font-bold text-sky-400 mb-3">ระดับ: ดีเยี่ยม (Excellent!)</div>
+
+                <!-- Stars Display -->
+                <div id="result-stars-container" class="flex justify-center gap-3 text-3xl md:text-4xl text-amber-400 mb-5">
+                    <i class="fa-solid fa-star"></i>
+                    <i class="fa-solid fa-star"></i>
+                    <i class="fa-solid fa-star"></i>
+                </div>
+
+                <!-- Stats Grid -->
+                <div class="grid grid-cols-2 gap-3 mb-6">
+                    <div class="bg-slate-800/80 p-3 rounded-2xl border border-slate-700">
+                        <div class="text-xs text-slate-400">คะแนนรวม (Score)</div>
+                        <div id="result-score" class="text-2xl font-black text-amber-400">100</div>
+                    </div>
+                    <div class="bg-slate-800/80 p-3 rounded-2xl border border-slate-700">
+                        <div class="text-xs text-slate-400">ความถูกต้อง (Accuracy)</div>
+                        <div id="result-accuracy" class="text-2xl font-black text-purple-400">100%</div>
+                    </div>
+                    <div class="bg-slate-800/80 p-3 rounded-2xl border border-slate-700">
+                        <div class="text-xs text-slate-400">ตอบถูก / ตอบผิด</div>
+                        <div class="text-base font-bold text-slate-200">
+                            <span id="result-correct" class="text-emerald-400">10</span> / <span id="result-wrong" class="text-rose-400">0</span>
+                        </div>
+                    </div>
+                    <div class="bg-slate-800/80 p-3 rounded-2xl border border-slate-700">
+                        <div class="text-xs text-slate-400">เวลาที่ใช้ไป (Time)</div>
+                        <div id="result-time" class="text-base font-bold text-sky-400">01:30</div>
+                    </div>
+                </div>
+
+                <button id="restart-game-btn" class="w-full py-4 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold text-lg rounded-2xl shadow-xl hover:shadow-emerald-500/30 transition duration-300 transform active:scale-95 flex items-center justify-center gap-3 cursor-pointer">
+                    <i class="fa-solid fa-rotate-right"></i>
+                    <span>เล่นอีกครั้ง (Play Again)</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Vocabulary Database for Primary Grade 3 Computer Terms
+        const VOCAB_DATABASE = [
+            { en: "Restart", th: "การเริ่มใหม่, เริ่มดำเนินใหม่" },
+            { en: "Password", th: "รหัสผ่าน" },
+            { en: "Memory", th: "หน่วยความจำ" },
+            { en: "Error", th: "ข้อผิดพลาด" },
+            { en: "ROM", th: "หน่วยความจำถาวร" },
+            { en: "Document", th: "เอกสาร" },
+            { en: "Backup", th: "การสำรองข้อมูล" },
+            { en: "Computer", th: "คอมพิวเตอร์" },
+            { en: "Hardware", th: "อุปกรณ์เครื่องคอมพิวเตอร์" },
+            { en: "Software", th: "โปรแกรมคอมพิวเตอร์" },
+            { en: "Keyboard", th: "แผงแป้นพิมพ์" },
+            { en: "Mouse", th: "เมาส์" },
+            { en: "Monitor", th: "จอภาพ" },
+            { en: "Printer", th: "เครื่องพิมพ์" },
+            { en: "Network", th: "เครือข่ายคอมพิวเตอร์" }
+        ];
+
+        // Synthetic Web Audio Manager (No external audio file dependencies)
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            playSuccess() {
+                this.init();
+                if (!this.ctx) return;
+
+                const now = this.ctx.currentTime;
+                const osc1 = this.ctx.createOscillator();
+                const osc2 = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc1.type = 'triangle';
+                osc2.type = 'sine';
+
+                // Success chord progression: C5 -> E5 -> G5 -> C6
+                osc1.frequency.setValueAtTime(523.25, now);
+                osc1.frequency.setValueAtTime(659.25, now + 0.08);
+                osc1.frequency.setValueAtTime(783.99, now + 0.16);
+                osc1.frequency.setValueAtTime(1046.50, now + 0.24);
+
+                osc2.frequency.setValueAtTime(261.63, now);
+                osc2.frequency.setValueAtTime(523.25, now + 0.16);
+
+                gain.gain.setValueAtTime(0.18, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+
+                osc1.connect(gain);
+                osc2.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc1.start(now);
+                osc2.start(now);
+                osc1.stop(now + 0.5);
+                osc2.stop(now + 0.5);
+            }
+
+            playError() {
+                this.init();
+                if (!this.ctx) return;
+
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, now);
+                osc.frequency.linearRampToValueAtTime(110, now + 0.25);
+
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+
+            playSelect() {
+                this.init();
+                if (!this.ctx) return;
+
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(440, now);
+                osc.frequency.exponentialRampToValueAtTime(880, now + 0.08);
+
+                gain.gain.setValueAtTime(0.12, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+
+                osc.start(now);
+                osc.stop(now + 0.08);
+            }
+        }
+
+        const soundManager = new SoundFX();
+
+        // Game Configuration
+        const GAME_CONFIG = {
+            totalQuestions: 10,
+            pairsPerPage: 5,
+            pointsPerCorrect: 10,
+            penaltyPerWrong: 5,
+            timeLimitSeconds: 120 // 2 minutes countdown
+        };
+
+        // Game State Variables
+        let gameState = {
+            score: 0,
+            questionIndex: 0,
+            timeRemainingSeconds: GAME_CONFIG.timeLimitSeconds,
+            timeElapsedSeconds: 0,
+            timerInterval: null,
+            totalCorrect: 0,
+            totalWrong: 0,
+            activePool: [],
+            currentPairs: [],
+            selectedLeftCard: null,
+            matchedPairsCount: 0,
+            inputMode: 'ar',
+            handIndexFingerTip: null,
+            handLandmarks: null,
+            isGameRunning: false
+        };
+
+        // DOM Element References
+        const canvas = document.getElementById('ar-canvas');
+        const ctx = canvas.getContext('2d');
+        const webcamFeed = document.getElementById('webcam-feed');
+        const leftCardsContainer = document.getElementById('left-cards-container');
+        const rightCardsContainer = document.getElementById('right-cards-container');
+        const feedbackPopup = document.getElementById('feedback-popup');
+        const feedbackBox = document.getElementById('feedback-box');
+        const feedbackIcon = document.getElementById('feedback-icon');
+        const feedbackText = document.getElementById('feedback-text');
+
+        // HUD References
+        const hudScore = document.getElementById('hud-score');
+        const hudCurrentQuestion = document.getElementById('hud-current-question');
+        const hudTotalQuestions = document.getElementById('hud-total-questions');
+        const hudTimer = document.getElementById('hud-timer');
+        const hudStars = document.getElementById('hud-stars');
+        const hudAccuracy = document.getElementById('hud-accuracy');
+        const cameraStatusText = document.getElementById('camera-status-text');
+        const cameraStatusPing = document.getElementById('camera-status-ping');
+        const toggleInputModeBtn = document.getElementById('toggle-input-mode-btn');
+
+        function shuffleArray(array) {
+            const arr = [...array];
+            for (let i = arr.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [arr[i], arr[j]] = [arr[j], arr[i]];
+            }
+            return arr;
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const secs = (seconds % 60).toString().padStart(2, '0');
+            return `${mins}:${secs}`;
+        }
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let handsDetector = null;
+        let cameraUtils = null;
+
+        async function initMediaPipe() {
+            try {
+                // Check if camera devices exist to gracefully fallback if unavailable
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                const hasVideoInput = devices.some(d => d.kind === 'videoinput');
+
+                if (!hasVideoInput) {
+                    throw new Error("No video input devices found");
+                }
+
+                handsDetector = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+
+                handsDetector.setOptions({
+                    maxNumHands: 1,
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.65,
+                    minTrackingConfidence: 0.65
+                });
+
+                handsDetector.onResults(onHandResults);
+
+                cameraUtils = new Camera(webcamFeed, {
+                    onFrame: async () => {
+                        if (gameState.inputMode === 'ar') {
+                            await handsDetector.send({ image: webcamFeed });
+                        }
+                    },
+                    width: 1280,
+                    height: 720
+                });
+
+                await cameraUtils.start();
+                cameraStatusText.textContent = "กล้อง AR พร้อมใช้งานแล้ว (Live Camera Active)";
+            } catch (err) {
+                console.warn("Camera probe error / falling back to mouse touch mode:", err);
+                cameraStatusText.textContent = "ไม่พบกล้อง Webcam - สลับเป็นโหมดเมาส์/สัมผัสอัตโนมัติ";
+                if (cameraStatusPing) {
+                    cameraStatusPing.classList.remove('bg-emerald-400');
+                    cameraStatusPing.classList.add('bg-amber-400');
+                }
+                switchInputMode('mouse');
+            }
+        }
+
+        function onHandResults(results) {
+            ctx.save();
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (results.image) {
+                ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+            }
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                gameState.handLandmarks = landmarks;
+
+                // Index finger tip is Landmark #8
+                const indexTip = landmarks[8];
+                const screenX = (1 - indexTip.x) * canvas.width;
+                const screenY = indexTip.y * canvas.height;
+
+                gameState.handIndexFingerTip = { x: screenX, y: screenY };
+
+                drawHandSkeleton(landmarks);
+                drawPointerRing(screenX, screenY);
+
+                if (gameState.isGameRunning && gameState.inputMode === 'ar') {
+                    processPointerInteraction(screenX, screenY);
+                }
+            } else {
+                gameState.handIndexFingerTip = null;
+                gameState.handLandmarks = null;
+            }
+
+            drawActiveDragLine();
+            ctx.restore();
+        }
+
+        function drawHandSkeleton(landmarks) {
+            const connections = [
+                [0,1],[1,2],[2,3],[3,4],
+                [0,5],[5,6],[6,7],[7,8],
+                [5,9],[9,10],[10,11],[11,12],
+                [9,13],[13,14],[14,15],[15,16],
+                [13,17],[17,18],[18,19],[19,20],[0,17]
+            ];
+
+            ctx.strokeStyle = 'rgba(56, 189, 248, 0.6)';
+            ctx.lineWidth = 3;
+
+            for (const [i, j] of connections) {
+                const p1 = landmarks[i];
+                const p2 = landmarks[j];
+                ctx.beginPath();
+                ctx.moveTo((1 - p1.x) * canvas.width, p1.y * canvas.height);
+                ctx.lineTo((1 - p2.x) * canvas.width, p2.y * canvas.height);
+                ctx.stroke();
+            }
+
+            for (const p of landmarks) {
+                ctx.beginPath();
+                ctx.arc((1 - p.x) * canvas.width, p.y * canvas.height, 4, 0, 2 * Math.PI);
+                ctx.fillStyle = '#38bdf8';
+                ctx.fill();
+            }
+        }
+
+        function drawPointerRing(x, y) {
+            ctx.beginPath();
+            ctx.arc(x, y, 12, 0, 2 * Math.PI);
+            ctx.fillStyle = '#fde047';
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.arc(x, y, 22, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#38bdf8';
+            ctx.lineWidth = 4;
+            ctx.shadowColor = '#38bdf8';
+            ctx.shadowBlur = 18;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawActiveDragLine() {
+            if (!gameState.selectedLeftCard) return;
+
+            const leftRect = gameState.selectedLeftCard.getBoundingClientRect();
+            const startX = leftRect.right;
+            const startY = leftRect.top + leftRect.height / 2;
+
+            let endX, endY;
+            if (gameState.inputMode === 'ar' && gameState.handIndexFingerTip) {
+                endX = gameState.handIndexFingerTip.x;
+                endY = gameState.handIndexFingerTip.y;
+            } else if (window.currentMousePos) {
+                endX = window.currentMousePos.x;
+                endY = window.currentMousePos.y;
+            } else {
+                return;
+            }
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.strokeStyle = '#fde047';
+            ctx.lineWidth = 6;
+            ctx.lineCap = 'round';
+            ctx.shadowColor = '#fde047';
+            ctx.shadowBlur = 20;
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Render loop fallback for mouse mode
+        function mainRenderLoop() {
+            if (gameState.inputMode === 'mouse') {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawActiveDragLine();
+            }
+            requestAnimationFrame(mainRenderLoop);
+        }
+        requestAnimationFrame(mainRenderLoop);
+
+        window.currentMousePos = null;
+        window.addEventListener('mousemove', (e) => {
+            window.currentMousePos = { x: e.clientX, y: e.clientY };
+        });
+
+        let lastHoveredCard = null;
+        let hoverTimer = 0;
+
+        function processPointerInteraction(px, py) {
+            if (gameState.selectedLeftCard) {
+                const rightCards = rightCardsContainer.querySelectorAll('.glass-card-right');
+                rightCards.forEach(card => {
+                    if (card.classList.contains('opacity-0')) return;
+
+                    const rect = card.getBoundingClientRect();
+                    if (px >= rect.left && px <= rect.right && py >= rect.top && py <= rect.bottom) {
+                        handleRightCardSelect(card);
+                    }
+                });
+            } else {
+                const leftCards = leftCardsContainer.querySelectorAll('.glass-card-left');
+                leftCards.forEach(card => {
+                    if (card.classList.contains('opacity-0')) return;
+
+                    const rect = card.getBoundingClientRect();
+                    if (px >= rect.left && px <= rect.right && py >= rect.top && py <= rect.bottom) {
+                        if (lastHoveredCard === card) {
+                            hoverTimer++;
+                            if (hoverTimer > 7) {
+                                handleLeftCardSelect(card);
+                                hoverTimer = 0;
+                            }
+                        } else {
+                            lastHoveredCard = card;
+                            hoverTimer = 0;
+                        }
+                    }
+                });
+            }
+        }
+
+        function startNewRound() {
+            hudTotalQuestions.textContent = GAME_CONFIG.totalQuestions;
+
+            if (gameState.activePool.length < GAME_CONFIG.totalQuestions) {
+                gameState.activePool = shuffleArray(VOCAB_DATABASE).slice(0, GAME_CONFIG.totalQuestions);
+            }
+
+            const startIndex = gameState.questionIndex;
+            gameState.currentPairs = gameState.activePool.slice(startIndex, startIndex + GAME_CONFIG.pairsPerPage);
+            gameState.matchedPairsCount = 0;
+
+            renderCards();
+        }
+
+        function renderCards() {
+            leftCardsContainer.innerHTML = '';
+            rightCardsContainer.innerHTML = '';
+
+            const leftList = [...gameState.currentPairs];
+            const rightList = shuffleArray([...gameState.currentPairs]);
+
+            leftList.forEach((pair) => {
+                const card = document.createElement('div');
+                card.className = 'glass-card glass-card-left p-3.5 md:p-5 rounded-2xl cursor-pointer text-center text-white font-bold text-base md:text-xl tracking-wide select-none transition transform active:scale-95';
+                card.dataset.en = pair.en;
+                card.innerText = pair.en;
+
+                card.addEventListener('click', () => handleLeftCardSelect(card));
+                leftCardsContainer.appendChild(card);
+            });
+
+            rightList.forEach((pair) => {
+                const card = document.createElement('div');
+                card.className = 'glass-card glass-card-right p-3.5 md:p-5 rounded-2xl cursor-pointer text-center text-white font-bold text-sm md:text-lg select-none transition transform active:scale-95';
+                card.dataset.en = pair.en;
+                card.innerText = pair.th;
+
+                card.addEventListener('click', () => handleRightCardSelect(card));
+                rightCardsContainer.appendChild(card);
+            });
+        }
+
+        function handleLeftCardSelect(cardEl) {
+            if (cardEl.classList.contains('opacity-0')) return;
+
+            soundManager.playSelect();
+
+            if (gameState.selectedLeftCard) {
+                gameState.selectedLeftCard.classList.remove('card-selected');
+            }
+
+            gameState.selectedLeftCard = cardEl;
+            cardEl.classList.add('card-selected');
+        }
+
+        function handleRightCardSelect(rightCardEl) {
+            if (!gameState.selectedLeftCard || rightCardEl.classList.contains('opacity-0')) return;
+
+            const leftEn = gameState.selectedLeftCard.dataset.en;
+            const rightEn = rightCardEl.dataset.en;
+
+            if (leftEn === rightEn) {
+                executeMatchSuccess(gameState.selectedLeftCard, rightCardEl);
+            } else {
+                executeMatchError(gameState.selectedLeftCard, rightCardEl);
+            }
+        }
+
+        function executeMatchSuccess(leftCard, rightCard) {
+            soundManager.playSuccess();
+
+            leftCard.classList.remove('card-selected');
+            leftCard.classList.add('card-correct');
+            rightCard.classList.add('card-correct');
+
+            gameState.score += GAME_CONFIG.pointsPerCorrect;
+            gameState.totalCorrect++;
+            gameState.questionIndex++;
+            gameState.matchedPairsCount++;
+
+            updateHUD();
+            showFeedback(true, "ถูกต้อง! / Excellent!");
+
+            confetti({
+                particleCount: 55,
+                spread: 70,
+                origin: { y: 0.6 }
+            });
+
+            setTimeout(() => {
+                leftCard.style.opacity = '0';
+                leftCard.style.pointerEvents = 'none';
+                rightCard.style.opacity = '0';
+                rightCard.style.pointerEvents = 'none';
+
+                gameState.selectedLeftCard = null;
+
+                if (gameState.matchedPairsCount >= GAME_CONFIG.pairsPerPage) {
+                    if (gameState.questionIndex >= GAME_CONFIG.totalQuestions) {
+                        endGame();
+                    } else {
+                        setTimeout(startNewRound, 600);
+                    }
+                }
+            }, 700);
+        }
+
+        function executeMatchError(leftCard, rightCard) {
+            soundManager.playError();
+
+            leftCard.classList.add('card-wrong');
+            rightCard.classList.add('card-wrong');
+
+            gameState.score = Math.max(0, gameState.score - GAME_CONFIG.penaltyPerWrong);
+            gameState.totalWrong++;
+
+            updateHUD();
+            showFeedback(false, "ลองใหม่อีกครั้ง!");
+
+            setTimeout(() => {
+                leftCard.classList.remove('card-wrong', 'card-selected');
+                rightCard.classList.remove('card-wrong');
+                gameState.selectedLeftCard = null;
+            }, 700);
+        }
+
+        function showFeedback(isSuccess, text) {
+            feedbackText.textContent = text;
+            if (isSuccess) {
+                feedbackBox.className = "px-8 py-4 rounded-3xl shadow-2xl border-4 backdrop-blur-md bg-emerald-900/85 border-emerald-400 text-emerald-200 flex flex-col items-center";
+                feedbackIcon.innerHTML = '<i class="fa-solid fa-circle-check text-emerald-400"></i>';
+            } else {
+                feedbackBox.className = "px-8 py-4 rounded-3xl shadow-2xl border-4 backdrop-blur-md bg-rose-900/85 border-rose-400 text-rose-200 flex flex-col items-center";
+                feedbackIcon.innerHTML = '<i class="fa-solid fa-circle-xmark text-rose-400"></i>';
+            }
+
+            feedbackPopup.classList.remove('opacity-0', 'scale-50');
+            feedbackPopup.classList.add('opacity-100', 'scale-100');
+
+            setTimeout(() => {
+                feedbackPopup.classList.remove('opacity-100', 'scale-100');
+                feedbackPopup.classList.add('opacity-0', 'scale-50');
+            }, 900);
+        }
+
+        function updateHUD() {
+            hudScore.textContent = gameState.score;
+            hudCurrentQuestion.textContent = Math.min(gameState.questionIndex + 1, GAME_CONFIG.totalQuestions);
+
+            const totalAttempts = gameState.totalCorrect + gameState.totalWrong;
+            const accuracy = totalAttempts === 0 ? 100 : Math.round((gameState.totalCorrect / totalAttempts) * 100);
+            hudAccuracy.textContent = `${accuracy}%`;
+
+            let starsCount = 3;
+            if (accuracy < 50) starsCount = 1;
+            else if (accuracy < 80) starsCount = 2;
+
+            hudStars.innerHTML = '';
+            for (let i = 0; i < 3; i++) {
+                if (i < starsCount) {
+                    hudStars.innerHTML += '<i class="fa-solid fa-star"></i>';
+                } else {
+                    hudStars.innerHTML += '<i class="fa-regular fa-star text-slate-600"></i>';
+                }
+            }
+        }
+
+        function switchInputMode(mode) {
+            gameState.inputMode = mode;
+            const modeIcon = document.getElementById('mode-icon');
+            const modeText = document.getElementById('mode-text');
+
+            if (mode === 'ar') {
+                modeIcon.className = 'fa-solid fa-video text-base';
+                modeText.textContent = 'โหมด AR นิ้วมือ';
+                canvas.classList.remove('hidden');
+            } else {
+                modeIcon.className = 'fa-solid fa-mouse text-base';
+                modeText.textContent = 'โหมด เมาส์/สัมผัส';
+                canvas.classList.add('hidden');
+            }
+        }
+
+        toggleInputModeBtn.addEventListener('click', () => {
+            const nextMode = gameState.inputMode === 'ar' ? 'mouse' : 'ar';
+            switchInputMode(nextMode);
+        });
+
+        function startGame() {
+            document.getElementById('start-modal').classList.add('hidden');
+            gameState.isGameRunning = true;
+            gameState.score = 0;
+            gameState.questionIndex = 0;
+            gameState.totalCorrect = 0;
+            gameState.totalWrong = 0;
+            gameState.timeRemainingSeconds = GAME_CONFIG.timeLimitSeconds;
+            gameState.timeElapsedSeconds = 0;
+            gameState.activePool = [];
+
+            updateHUD();
+            startNewRound();
+
+            clearInterval(gameState.timerInterval);
+            gameState.timerInterval = setInterval(() => {
+                gameState.timeElapsedSeconds++;
+                gameState.timeRemainingSeconds = Math.max(0, GAME_CONFIG.timeLimitSeconds - gameState.timeElapsedSeconds);
+                hudTimer.textContent = formatTime(gameState.timeRemainingSeconds);
+
+                if (gameState.timeRemainingSeconds <= 0) {
+                    endGame();
+                }
+            }, 1000);
+        }
+
+        function endGame() {
+            gameState.isGameRunning = false;
+            clearInterval(gameState.timerInterval);
+
+            const totalAttempts = gameState.totalCorrect + gameState.totalWrong;
+            const accuracy = totalAttempts === 0 ? 100 : Math.round((gameState.totalCorrect / totalAttempts) * 100);
+
+            document.getElementById('result-score').textContent = gameState.score;
+            document.getElementById('result-accuracy').textContent = `${accuracy}%`;
+            document.getElementById('result-correct').textContent = gameState.totalCorrect;
+            document.getElementById('result-wrong').textContent = gameState.totalWrong;
+            document.getElementById('result-time').textContent = formatTime(gameState.timeElapsedSeconds);
+
+            const gradeEl = document.getElementById('result-grade');
+            const starsContainer = document.getElementById('result-stars-container');
+
+            let starsHTML = '';
+            if (accuracy >= 85) {
+                gradeEl.textContent = 'ระดับ: ดีเยี่ยม (Excellent!)';
+                gradeEl.className = 'text-lg md:text-xl font-bold text-emerald-400 mb-3';
+                starsHTML = '<i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i>';
+            } else if (accuracy >= 70) {
+                gradeEl.textContent = 'ระดับ: ดีมาก (Very Good)';
+                gradeEl.className = 'text-lg md:text-xl font-bold text-sky-400 mb-3';
+                starsHTML = '<i class="fa-solid fa-star"></i><i class="fa-solid fa-star"></i><i class="fa-regular fa-star text-slate-600"></i>';
+            } else if (accuracy >= 50) {
+                gradeEl.textContent = 'ระดับ: ดี (Good)';
+                gradeEl.className = 'text-lg md:text-xl font-bold text-amber-400 mb-3';
+                starsHTML = '<i class="fa-solid fa-star"></i><i class="fa-regular fa-star text-slate-600"></i><i class="fa-regular fa-star text-slate-600"></i>';
+            } else {
+                gradeEl.textContent = 'ระดับ: ควรฝึกเพิ่มเติม (Needs Practice)';
+                gradeEl.className = 'text-lg md:text-xl font-bold text-rose-400 mb-3';
+                starsHTML = '<i class="fa-regular fa-star text-slate-600"></i><i class="fa-regular fa-star text-slate-600"></i><i class="fa-regular fa-star text-slate-600"></i>';
+            }
+            starsContainer.innerHTML = starsHTML;
+
+            document.getElementById('result-modal').classList.remove('hidden');
+
+            confetti({
+                particleCount: 120,
+                spread: 100,
+                origin: { y: 0.5 }
+            });
+        }
+
+        // Modal Event Handlers
+        document.getElementById('start-game-btn').addEventListener('click', () => {
+            soundManager.init();
+            startGame();
+        });
+
+        document.getElementById('restart-game-btn').addEventListener('click', () => {
+            document.getElementById('result-modal').classList.add('hidden');
+            startGame();
+        });
+
+        document.getElementById('open-curriculum-btn').addEventListener('click', () => {
+            document.getElementById('curriculum-modal').classList.remove('hidden');
+        });
+
+        document.getElementById('close-curriculum-btn').addEventListener('click', () => {
+            document.getElementById('curriculum-modal').classList.add('hidden');
+        });
+
+        window.addEventListener('load', () => {
+            initMediaPipe();
+        });
+    </script>
+</body>
+</html>
